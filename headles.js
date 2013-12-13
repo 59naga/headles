@@ -1,11 +1,17 @@
-
 Events.endofscript=function(){
-  const version='headles 0.0.4';
+  Events.endofload=function(){
+    tool.emit('palette',null,function(){
+      tool.emit('log');
+    });
+    console.log(version);
+  }
+
+  const version='headles 0.0.5';
   var camera=new Camera(innerWidth>innerHeight? innerHeight: innerWidth);
   var bitmap=new Bitmap(32);
   var tool=new EventEmitter;
   var timer=new Timer(500);
-  var log=new Array(JSON.stringify(bitmap));
+  var log=new Array();
   var events=new Events(window);
   events.on('touch',function(event){
     timer.start();
@@ -26,32 +32,21 @@ Events.endofscript=function(){
   timer.on('tick',function(){console.log(this.i)});
   tool.on('stroke',function(event){
     if(tool.disabled==null){
-      if(timer.i==0){
-        tool.emit('pencil',event);
-      }
+      var name=['pencil'][timer.i];
+      tool.emit(name,event);
     }
   });
   tool.on('release',function(event){
     if(tool.disabled==null){
-      if(timer.i==0){
-        console.log('pencil');
-        tool.emit('pencil',event);
-        tool.once('pencil_then',function(){
+      var name=['pencil','palette','log_undo','save'][timer.i];
+      var callback=null;
+      if(timer.i<2){
+        callback=function(){
           tool.emit('log');
-        })
+        }
       }
-      if(timer.i==1){
-        console.log('palette');
-        tool.emit('palette',event);
-      }
-      if(timer.i==2){
-        console.log('log_undo');
-        tool.emit('log_undo',event);
-      }
-      if(timer.i>=3){
-        console.log('save');
-        tool.emit('save',event);
-      }
+
+      tool.emit(name,event,callback);
     }
   });
 
@@ -62,7 +57,7 @@ Events.endofscript=function(){
     tool.on('pencil',function(){
       pencil.play();
     });
-    tool.on('pencil',function(event){
+    tool.on('pencil',function(event,callback){
       var eventX=event.clientX;
       var eventY=event.clientY;
       if(event.changedTouches){
@@ -85,17 +80,15 @@ Events.endofscript=function(){
       }
       tool.cache.previous={x:x,y:y};
 
-      tool.emit('pencil_then');
-    });
-    tool.on('pencil_then',function(event){
       camera.projection(bitmap);
-    })
+      if(callback){callback(event);}
+    });
 
     var palette=new Sound('http://jsrun.it/assets/w/E/W/p/wEWpv.wav');
     tool.on('palette',function(){
       palette.play();
     });
-    tool.on('palette',function(event){
+    tool.on('palette',function(event,callback){
       var canvas=document.createElement('canvas');
           canvas.width=canvas.height=32;
       var ctx=canvas.getContext('2d');
@@ -105,7 +98,6 @@ Events.endofscript=function(){
         for(var x=0;x<canvas.width;x++){
           var r,g,b;r=g=b=255;
 
-          var size=canvas.width/2;
           var hue=Math.round(360*(y+1)/canvas.height);
           //red
           if(60<=hue){
@@ -143,6 +135,7 @@ Events.endofscript=function(){
               b=b-(255*(hue-300)/60);
             }
           }
+          var size=canvas.width/2;
           if(x<size){
             var saturation=x/size;
             r=r+(255-r)*(1-saturation);
@@ -162,6 +155,7 @@ Events.endofscript=function(){
           image.data[i+3]=255;
           i+=4;
         }
+        // break;
       }
       ctx.putImageData(image,0,0);
 
@@ -190,36 +184,35 @@ Events.endofscript=function(){
         bitmap.palette.color(colorcode,bitmap.palette.using+1);
 
         camera.projection(bitmap);
-        tool.emit('palette_then');
+        setTimeout(function(){
+          tool.disabled=null;//releaceが被る
+          if(callback){
+            callback(event);
+          }
+        },100);
       });
-    });
-    tool.on('palette_then',function(){
-      tool.emit('log');
-      setTimeout(function(){
-        tool.disabled=null;
-      },100);
     });
 
     tool.on('log',function(event){
-      log.unshift(JSON.stringify(bitmap));
+      log.i=log.length;
+      log.push(JSON.stringify(bitmap));
     });
     tool.on('log_undo',function(event){
-      if(log.length){
-        bitmap=JSON.parse(log.shift());
-        bitmap.__proto__=Bitmap.prototype;
-        bitmap.palette.__proto__=Palette.prototype;
-
-        camera.projection(bitmap);
+      if(1<log.length){
+        log.pop();
       }
+      bitmap=JSON.parse(log[log.length-1]);
+      bitmap.__proto__=Bitmap.prototype;
+      bitmap.palette.__proto__=Palette.prototype;
+
+      camera.projection(bitmap);
     });
 
     tool.on('save',function(event){
       var image=camera.develop(bitmap);
       history.pushState(null,null,image.toDataURL('image/png'));
     });
-
-    tool.emit('palette');
-    console.log(version);
+    Events.endofload();
   });
 }
 
@@ -336,8 +329,6 @@ function Camera(size){
     var size=canvas.width;
     var x=this.x;
     var y=this.y;
-    ctx.fillStyle=bitmap.palette[bitmap.palette.using];
-    ctx.clearRect(0,0,size,size);
     ctx.drawImage(image,x,y,size,size);
 
     var sight=size/bitmap.length;
@@ -346,8 +337,6 @@ function Camera(size){
     ctx.fillStyle=bitmap.palette[bitmap.palette.using];
     ctx.fillRect(x-sight/2,y,sight,1);
     ctx.fillRect(x,y-sight/2,1,sight);
-
-    return ctx;
   }
 
 function Bitmap(length){
@@ -361,7 +350,6 @@ function Bitmap(length){
     }
   }
 }
-  Bitmap.prototype=new Array;
   Bitmap.prototype.paint=function(x,y){
     if(this[x]&&this[x][y]!=null){
       this[x][y]=this.palette.using;
@@ -385,7 +373,6 @@ function Palette(number){
     this[i]="black";
   }
 }
-  Palette.prototype=new Array;
   Palette.prototype.color=function(value,use){
     var use=use|| this.using;
     this[use]=value|| this[use];
